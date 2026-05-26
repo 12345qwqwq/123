@@ -73,8 +73,7 @@ const C = {
   BG:'#050505', INK:'#f2f2ee', COLD_BG:'#070912',
   GN:13, GX:2, GY:4, GRAD:90, GSCALE:2.6, BASE_W:400, MAX_W:820, TOUCH_THRESHOLD:0.80,
   SHATTER_MS:1300, SHATTER_SPD:7, SHATTER_GRAV:0.4,
-  FLAME_GW:172, SMOLDER:0.30, SMOLDER_GROW:0.55, FIRE_GROW:2.4, FIRE_CONSUME:2.6, FIRE_DIE:3.0,
-  IGNITE_THRESH:0.52, SEED_FIRE:0.05, CATCH_FIRE:0.34, BURN_DONE:0.93, IGNITE_R:10,
+  FLAME_DS:3, FLAME_BRUSH:30, HEAT_ADD:0.5, HEAT_FADE:0.05, MARK_W:84, BURN_DONE:0.38,
   SCRATCH:'rgba(90,90,98,0.45)',
   MARGIN_X_F:0.10, MARGIN_TOP:70, MARGIN_BOT:64, LINE_RATIO:1.7, FONT_MAX:22, FONT_MIN:10, PRINT_CPS:42,
   DETACH_PROB:0.5, DETACH_R:30, DRIP_CLING_MS:130, DRIP_GRAV:0.62, DRIP_ELONG:0.020, DRIP_ELONG_MAX:1.9, DRIP_WOBBLE:0.5,
@@ -197,22 +196,23 @@ class ShardField {
 const FLAME_FS = `
 precision highp float;
 varying vec2 v_uv;
-uniform sampler2D u_fire;
+uniform sampler2D u_heat;
 uniform float u_time;
 float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
 float vnoise(vec2 p){ vec2 i=floor(p),f=fract(p); vec2 u=f*f*(3.0-2.0*f);
   return mix(mix(hash(i),hash(i+vec2(1,0)),u.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x),u.y); }
 float fbm(vec2 p){ float v=0.0,a=0.5; for(int i=0;i<4;i++){ v+=a*vnoise(p); p*=2.0; a*=0.5; } return v; }
-vec3 flamePool(float e){ e=clamp(e,0.0,1.0);
-  vec3 c0=vec3(0.16,0.07,0.02),c1=vec3(0.37,0.12,0.02),c2=vec3(0.70,0.27,0.04),c3=vec3(1.0,0.48,0.12),c4=vec3(1.0,0.76,0.36),c5=vec3(1.0,0.94,0.78);
-  float t=e*5.0; if(t<1.0)return mix(c0,c1,t); if(t<2.0)return mix(c1,c2,t-1.0); if(t<3.0)return mix(c2,c3,t-2.0); if(t<4.0)return mix(c3,c4,t-3.0); return mix(c4,c5,t-4.0); }
 void main(){ vec2 uv=v_uv;
-  float n=fbm(uv*7.0+vec2(0.0,-u_time*0.7));
-  float fire=texture2D(u_fire, uv+(n-0.5)*0.02).r;
-  float e=clamp(fire*1.25-(n-0.5)*0.55,0.0,1.0);
-  if(e<0.05) discard;
-  vec3 col=flamePool(e);
-  float a=smoothstep(0.05,0.30,e)*(0.85+0.15*sin(u_time*9.0+n*6.0));
+  float n=fbm(uv*8.0+vec2(0.0,-u_time*1.1));
+  float h=texture2D(u_heat, uv+(n-0.5)*0.015).r;
+  float f=clamp(h*1.4 - n*0.45,0.0,1.0);
+  if(f<0.045) discard;
+  float glow=smoothstep(0.045,0.55,f);
+  float core=smoothstep(0.62,0.95,f);
+  vec3 col=mix(vec3(0.55,0.10,0.02), vec3(1.0,0.42,0.12), smoothstep(0.0,0.42,f));
+  col=mix(col, vec3(1.0,0.95,0.8), core);
+  float flick=0.8+0.2*sin(u_time*10.0+n*8.0);
+  float a=glow*flick;
   gl_FragColor=vec4(col*a,a); }`;
 const FLAME_VS = `attribute vec2 a_pos; varying vec2 v_uv; void main(){ v_uv=a_pos*0.5+0.5; gl_Position=vec4(a_pos,0.0,1.0); }`;
 
@@ -221,7 +221,7 @@ class FlameField {
     this.gl=gl; this.speed=1; this.ok=!!gl; if(!gl)return;
     const vs=this._sh(gl.VERTEX_SHADER,FLAME_VS), fs=this._sh(gl.FRAGMENT_SHADER,FLAME_FS);
     const p=gl.createProgram(); gl.attachShader(p,vs); gl.attachShader(p,fs); gl.bindAttribLocation(p,0,'a_pos'); gl.linkProgram(p); this.prog=p;
-    this.uFire=gl.getUniformLocation(p,'u_fire'); this.uTime=gl.getUniformLocation(p,'u_time');
+    this.uHeat=gl.getUniformLocation(p,'u_heat'); this.uTime=gl.getUniformLocation(p,'u_time');
     const q=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,q); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
     this.tex=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,this.tex);
@@ -230,27 +230,23 @@ class FlameField {
     gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA); }
   _sh(t,src){ const g=this.gl,s=g.createShader(t); g.shaderSource(s,src); g.compileShader(s); if(!g.getShaderParameter(s,g.COMPILE_STATUS))throw new Error(g.getShaderInfoLog(s)); return s; }
   build(w,h,dpr){ this.W=w; this.H=h; this.cv.width=w*dpr; this.cv.height=h*dpr;
-    this.gw=C.FLAME_GW; this.gh=Math.max(8,Math.round(this.gw*h/w)); const n=this.gw*this.gh;
-    this.fire=new Float32Array(n); this.fuel=new Float32Array(n).fill(1); this.nfire=new Float32Array(n); this.pix=new Uint8Array(n*4);
-    if(this.gl) this.gl.viewport(0,0,this.cv.width,this.cv.height); }
-  ignite(px,py){ const gx=clamp((px/this.W*this.gw)|0,0,this.gw-1), gy=clamp((py/this.H*this.gh)|0,0,this.gh-1), R=Math.max(1,(C.IGNITE_R/this.W*this.gw)|0);
-    for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){ const x=gx+dx,y=gy+dy; if(x<0||y<0||x>=this.gw||y>=this.gh)continue; if(dx*dx+dy*dy>R*R)continue;
-      const i=y*this.gw+x; if(this.fuel[i]>0&&this.fire[i]<C.SEED_FIRE) this.fire[i]=C.SEED_FIRE; } }
-  igniteStroke(x0,y0,x1,y1){ const d=Math.hypot(x1-x0,y1-y0),steps=Math.max(1,(d/8)|0); for(let i=0;i<=steps;i++){ const t=i/steps; this.ignite(x0+(x1-x0)*t,y0+(y1-y0)*t); } }
-  step(dt){ const gw=this.gw,gh=this.gh,fire=this.fire,fuel=this.fuel,nf=this.nfire,grow=C.FIRE_GROW*this.speed;
-    for(let y=0;y<gh;y++)for(let x=0;x<gw;x++){ const i=y*gw+x; let f=fire[i];
-      if(fuel[i]>0&&f<0.0001){ let mn=0; if(x>0&&fire[i-1]>mn)mn=fire[i-1]; if(x<gw-1&&fire[i+1]>mn)mn=fire[i+1]; if(y>0&&fire[i-gw]>mn)mn=fire[i-gw]; if(y<gh-1&&fire[i+gw]>mn)mn=fire[i+gw];
-        if(mn>C.IGNITE_THRESH) f=C.CATCH_FIRE; }
-      if(f>0){ const rate=f<C.SMOLDER?C.SMOLDER_GROW:grow; f=Math.min(1,f+rate*dt); fuel[i]-=C.FIRE_CONSUME*f*dt; if(fuel[i]<=0){ fuel[i]=0; f-=C.FIRE_DIE*dt; if(f<0)f=0; } }
-      nf[i]=f; }
-    fire.set(nf); }
-  burnedFraction(){ let n=0; for(let i=0;i<this.fuel.length;i++) if(this.fuel[i]<=0)n++; return n/this.fuel.length; }
-  active(){ for(let i=0;i<this.fire.length;i++) if(this.fire[i]>0.02)return true; return false; }
-  render(now){ if(!this.gl)return; const gl=this.gl; const n=this.gw*this.gh;
-    for(let i=0;i<n;i++){ this.pix[i*4]=this.fire[i]*255; this.pix[i*4+1]=this.fuel[i]*255; this.pix[i*4+2]=0; this.pix[i*4+3]=255; }
-    gl.bindTexture(gl.TEXTURE_2D,this.tex); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,this.gw,this.gh,0,gl.RGBA,gl.UNSIGNED_BYTE,this.pix);
+    this.hw=Math.max(48,Math.round(w/C.FLAME_DS)); this.hh=Math.max(28,Math.round(h/C.FLAME_DS));
+    this.heat=document.createElement('canvas'); this.heat.width=this.hw; this.heat.height=this.hh; this.hc=this.heat.getContext('2d');
+    this.hc.fillStyle='#000'; this.hc.fillRect(0,0,this.hw,this.hh);
+    this.mw=C.MARK_W; this.mh=Math.max(8,Math.round(C.MARK_W*h/w)); this.mark=new Uint8Array(this.mw*this.mh); this.markCount=0;
+    if(this.gl)this.gl.viewport(0,0,this.cv.width,this.cv.height); }
+  stamp(px,py){ const hx=px/this.W*this.hw, hy=py/this.H*this.hh, r=Math.max(2,C.FLAME_BRUSH/this.W*this.hw);
+    const c=this.hc, g=c.createRadialGradient(hx,hy,0,hx,hy,r); g.addColorStop(0,'rgba(255,255,255,'+C.HEAT_ADD+')'); g.addColorStop(0.5,'rgba(255,255,255,'+(C.HEAT_ADD*0.45)+')'); g.addColorStop(1,'rgba(255,255,255,0)');
+    c.globalCompositeOperation='lighter'; c.fillStyle=g; c.beginPath(); c.arc(hx,hy,r,0,7); c.fill(); c.globalCompositeOperation='source-over';
+    const mx=clamp((px/this.W*this.mw)|0,0,this.mw-1), my=clamp((py/this.H*this.mh)|0,0,this.mh-1), mr=Math.max(1,(C.FLAME_BRUSH/this.W*this.mw)|0);
+    for(let dy=-mr;dy<=mr;dy++)for(let dx=-mr;dx<=mr;dx++){ const x=mx+dx,y=my+dy; if(x<0||y<0||x>=this.mw||y>=this.mh)continue; if(dx*dx+dy*dy>mr*mr)continue; const i=y*this.mw+x; if(!this.mark[i]){this.mark[i]=1;this.markCount++;} } }
+  stroke(x0,y0,x1,y1){ const d=Math.hypot(x1-x0,y1-y0),steps=Math.max(1,(d/6)|0); for(let i=0;i<=steps;i++){ const t=i/steps; this.stamp(x0+(x1-x0)*t,y0+(y1-y0)*t); } }
+  step(dt){ if(!this.hc)return; const keep=Math.pow(1-C.HEAT_FADE,dt*60); this.hc.globalCompositeOperation='source-over'; this.hc.fillStyle='rgba(0,0,0,'+(1-keep)+')'; this.hc.fillRect(0,0,this.hw,this.hh); }
+  coverage(){ return this.markCount/(this.mw*this.mh); }
+  render(now){ if(!this.gl)return; const gl=this.gl;
+    gl.bindTexture(gl.TEXTURE_2D,this.tex); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,this.heat);
     gl.viewport(0,0,this.cv.width,this.cv.height); gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.useProgram(this.prog); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,this.tex); gl.uniform1i(this.uFire,0); gl.uniform1f(this.uTime,now*0.001);
+    gl.useProgram(this.prog); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,this.tex); gl.uniform1i(this.uHeat,0); gl.uniform1f(this.uTime,now*0.001);
     gl.drawArrays(gl.TRIANGLES,0,3); }
   clearGL(){ if(!this.gl)return; this.gl.clearColor(0,0,0,0); this.gl.clear(this.gl.COLOR_BUFFER_BIT); }
 }
@@ -335,17 +331,17 @@ class App {
     $('replay').onclick=()=>this._reset(); }
   _input(){ const p=this.ptr;
     if(this.state===ST.PORTRAIT){ this.portrait.influence(p.x,p.y,performance.now()); const cov=this.portrait.coverage(); this.meter.style.width=Math.min(100,cov/C.TOUCH_THRESHOLD*100)+'%'; if(cov>=C.TOUCH_THRESHOLD)this._shatter(); }
-    else if(this.state===ST.BURN){ this.scratch.stroke(p.px||p.x,p.py||p.y,p.x,p.y); this.flame.igniteStroke(p.px||p.x,p.py||p.y,p.x,p.y); }
+    else if(this.state===ST.BURN){ this.scratch.stroke(p.px||p.x,p.py||p.y,p.x,p.y); this.flame.stroke(p.px||p.x,p.py||p.y,p.x,p.y); }
     else if(this.state===ST.INTERACT){ const gs=this.type.near(p.x,p.y,C.DETACH_R); for(const g of gs){ if(Math.random()<C.DETACH_PROB*this.shedScale){ g.removed=true; this.drips.push(new DripLetter(g,this.type.fs)); } } }
   }
   _shatter(){ this.state=ST.SHATTER; if(this.portrait.dirty||this.portrait.live.size)this.portrait.render(); this.shards.build(this.portrait,this.W,this.H); this.meterWrap.style.opacity=0; this.hint.style.opacity=0; }
-  _enterBurn(){ this.state=ST.BURN; this.stage.style.cursor=KNIFE_CURSOR; this.hint.textContent='drag the blade — cut and let it catch fire'; this.hint.style.opacity=1; this.hintGone=false; setTimeout(()=>{this.hint.style.opacity=0;this.hintGone=true;},3600); }
-  _enterPrint(){ this.state=ST.PRINT; this.stage.style.cursor=''; if(this.flame.clearGL)this.flame.clearGL(); }
+  _enterBurn(){ this.state=ST.BURN; this.stage.style.cursor=KNIFE_CURSOR; this.meterWrap.style.opacity=1; this.meter.style.width='0%'; this.hint.textContent='drag the blade — cut along the dark and let it catch fire'; this.hint.style.opacity=1; this.hintGone=false; setTimeout(()=>{this.hint.style.opacity=0;this.hintGone=true;},3600); }
+  _enterPrint(){ this.state=ST.PRINT; this.stage.style.cursor=''; this.meterWrap.style.opacity=0; if(this.flame.clearGL)this.flame.clearGL(); }
   _enterInteract(){ this.state=ST.INTERACT; this.hint.textContent='touch the words — let them fall'; this.hint.style.opacity=1; this.hintGone=false; setTimeout(()=>{this.hint.style.opacity=0;this.hintGone=true;},3600); }
   loop(now){ const dt=Math.min(0.05,(now-this.last)/1000); this.last=now;
     if(this.state===ST.PORTRAIT){ this.portrait.step(now); }
     else if(this.state===ST.SHATTER){ if(this.shards.done())this._enterBurn(); }
-    else if(this.state===ST.BURN){ this.flame.step(dt); this.meter.style.opacity=0; if(this.flame.burnedFraction()>=C.BURN_DONE)this._enterPrint(); }
+    else if(this.state===ST.BURN){ this.flame.step(dt); this.meter.style.width=Math.min(100,this.flame.coverage()/C.BURN_DONE*100)+'%'; if(this.flame.coverage()>=C.BURN_DONE)this._enterPrint(); }
     else if(this.state===ST.PRINT){ if(this.type.advance(dt))this._enterInteract(); }
     if(this.drips.length){ for(let i=this.drips.length-1;i>=0;i--){ const L=this.drips[i]; L.step(); if(L.y>=this.heap.topAt(L.x)-L.fs*0.5||L.y>=this.H-L.fs*0.4){ this.heap.settle(L); this.drips.splice(i,1); } } }
 
