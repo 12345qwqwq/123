@@ -78,6 +78,7 @@ const C = {
   MARGIN_X_F:0.10, MARGIN_TOP:70, MARGIN_BOT:64, LINE_RATIO:1.7, FONT_MAX:22, FONT_MIN:10, PRINT_CPS:42,
   DETACH_PROB:0.5, DETACH_R:30, DRIP_CLING_MS:130, DRIP_GRAV:0.62, DRIP_ELONG:0.020, DRIP_ELONG_MAX:1.9, DRIP_WOBBLE:0.5,
   HEAP_BINS:130, HEAP_PACK:0.60, HEAP_BUMP:0.30, HEAP_MAXH_F:0.92,
+  MELT_AFTER_FRAC:0.78, MELT_MS:3800, MELT_STRIP:3, MELT_DRIP_F:0.55, ACID:'#86ffba', PART3_CPS:28,
 };
 
 /* assets injected from Part One */
@@ -122,7 +123,14 @@ const STORY = [
   "When the *acid* touched your face you learned what worst could mean. The pain was close to dying. You screamed, and the sound came back at you off the concrete, again and again.",
   "He studied you the way a sculptor studies an unfinished work. But what he wanted was *ruin*. A little asymmetry is better, he said. And the voice is a problem too. The tip of the knife pressed against skin.",
   "He left you at the edge of the road, with a square of cardboard: born this way, no one in the world, kind people please help. You wanted to scream that someone had *done this to you*, that they should call *the police*, that you would *kill him*. But you could not make a sound.",
-  "Coins dropped into the tin bowl. Someone crouched, said what a poor child, then stood and walked away. You lowered your head. In the stacked coins, blurred, a face. *Who are you?*"
+  "Coins dropped into the tin bowl. Someone crouched, said what a poor child, then stood and walked away. You lowered your head. In the stacked coins, blurred, a face. ~Who are you?~"
+];
+
+/* Part Three — placeholder until the real text is pasted */
+const PART3 = [
+  "Part Three.",
+  "Paste the Part Three text here. This placeholder exists only so the melt connects into Part Three and the whole sequence can be tested end to end.",
+  "The page settles, and something else begins."
 ];
 
 /* ------------------------------ helpers ------------------------------ */
@@ -261,8 +269,8 @@ class Scratches {
 
 /* ------------------------------ TYPESETTER (Part Two) ---------------- */
 class Typesetter {
-  constructor(){ this.glyphs=[]; this.typed=0; }
-  _tok(p){ const words=[]; let bold=false,cur=null; for(const ch of p){ if(ch==='*'){bold=!bold;continue;} if(ch===' '){ if(cur){words.push(cur);cur=null;} continue; } if(!cur)cur={chars:[]}; cur.chars.push({ch,bold}); } if(cur)words.push(cur); for(const w of words)w.len=w.chars.length; return words; }
+  constructor(text,cps){ this.text=text||STORY; this.cps=cps||C.PRINT_CPS; this.glyphs=[]; this.typed=0; this.droppable=0; }
+  _tok(p){ const words=[]; let bold=false,prot=false,cur=null; for(const ch of p){ if(ch==='*'){bold=!bold;continue;} if(ch==='~'){prot=!prot; bold=prot||bold; continue;} if(ch===' '){ if(cur){words.push(cur);cur=null;} continue; } if(!cur)cur={chars:[]}; cur.chars.push({ch,bold,prot}); } if(cur)words.push(cur); for(const w of words)w.len=w.chars.length; return words; }
   layout(w,h,dpr,fontScale){ this.W=w; this.H=h; const {cv,c}=newCanvas(w,h,dpr); this.cv=cv; this.c=c;
     const boxX=Math.round(w*C.MARGIN_X_F),boxW=w-2*boxX,boxTop=C.MARGIN_TOP,boxH=(h-C.MARGIN_BOT)-boxTop;
     let fs=Math.min(C.FONT_MAX,w/30)*fontScale,lines,charW,lh;
@@ -270,15 +278,15 @@ class Typesetter {
     this.fs=fs; const spaceW=charW; this.glyphs=[]; let y=boxTop+lh*0.72;
     for(const line of lines){ if(line.blank){ y+=lh*0.5; continue; } const nn=line.words.length,natural=line.words.reduce((s,wd)=>s+wd.len*charW,0)+spaceW*(nn-1);
       let gap=spaceW; if(!line.paraEnd&&nn>1)gap=spaceW+(boxW-natural)/(nn-1); let x=boxX;
-      for(let wi=0;wi<nn;wi++){ const wd=line.words[wi]; for(const g of wd.chars){ this.glyphs.push({ch:g.ch,bold:g.bold,x,y,removed:false}); x+=charW; } x+=gap; } y+=lh; }
-    this.typed=0; }
-  _wrap(charW,boxW){ const out=[],spaceW=charW; for(const para of STORY){ const words=this._tok(para); let cur=[],cw=0;
+      for(let wi=0;wi<nn;wi++){ const wd=line.words[wi]; for(const g of wd.chars){ this.glyphs.push({ch:g.ch,bold:g.bold,prot:g.prot,x,y,removed:false}); x+=charW; } x+=gap; } y+=lh; }
+    this.droppable=this.glyphs.reduce((s,g)=>s+(g.prot?0:1),0); this.typed=0; }
+  _wrap(charW,boxW){ const out=[],spaceW=charW; for(const para of this.text){ const words=this._tok(para); let cur=[],cw=0;
     for(const wd of words){ const ww=wd.len*charW,add=(cur.length?spaceW:0)+ww; if(cur.length&&cw+add>boxW){ out.push({words:cur,paraEnd:false}); cur=[]; cw=0; } cur.push(wd); cw+=(cur.length>1?spaceW:0)+ww; }
     if(cur.length)out.push({words:cur,paraEnd:true}); out.push({blank:true}); } return out; }
-  advance(dt){ this.typed=Math.min(this.glyphs.length,this.typed+C.PRINT_CPS*dt); return this.typed>=this.glyphs.length; }
+  advance(dt){ this.typed=Math.min(this.glyphs.length,this.typed+this.cps*dt); return this.typed>=this.glyphs.length; }
   render(){ const c=this.c; c.clearRect(0,0,this.W,this.H); c.textAlign='left'; c.textBaseline='alphabetic'; let cb=null; const n=this.typed|0;
     for(let i=0;i<n;i++){ const g=this.glyphs[i]; if(g.removed)continue; if(g.bold!==cb){ cb=g.bold; c.font=`${cb?800:400} ${this.fs}px 'JetBrains Mono',monospace`; } c.fillStyle=C.INK; c.fillText(g.ch,g.x,g.y); } }
-  near(x,y,r){ const out=[],r2=r*r,n=this.typed|0; for(let i=0;i<n;i++){ const g=this.glyphs[i]; if(g.removed)continue; const dx=g.x-x,dy=(g.y-this.fs*0.35)-y; if(dx*dx+dy*dy<r2)out.push(g); } return out; }
+  near(x,y,r){ const out=[],r2=r*r,n=this.typed|0; for(let i=0;i<n;i++){ const g=this.glyphs[i]; if(g.removed||g.prot)continue; const dx=g.x-x,dy=(g.y-this.fs*0.35)-y; if(dx*dx+dy*dy<r2)out.push(g); } return out; }
 }
 
 /* ------------------------------ DRIP LETTER (teardrop) --------------- */
@@ -303,20 +311,34 @@ class Heap {
     for(const s of this.landed){ c.save(); c.translate(s.x,s.y); c.rotate(s.rot); c.font=`${s.bold?800:400} ${s.fs}px 'JetBrains Mono',monospace`; c.fillStyle=C.INK; c.fillText(s.ch,0,0); c.restore(); } }
 }
 
+/* ------------------------------ MELT (acid flow, ref. part2.html) ---- */
+class Melt {
+  build(w,h,dpr){ this.W=w; this.H=h; this.dpr=dpr; const {cv,c}=newCanvas(w,h,dpr); this.buf=cv; this.bc=c; this.cols=null; }
+  start(){ const n=Math.ceil(this.W/C.MELT_STRIP); this.cols=new Float32Array(n); for(let i=0;i<n;i++) this.cols[i]=0.5+0.34*Math.sin(i*0.06)+0.18*Math.sin(i*0.021+1.3); }
+  render(sc, src, k){ if(!this.cols)return; const w=this.W,h=this.H,strip=C.MELT_STRIP,dpr=this.dpr,bc=this.bc;
+    bc.setTransform(1,0,0,1,0,0); bc.clearRect(0,0,this.buf.width,this.buf.height);
+    const drop=k*k*h*C.MELT_DRIP_F, t=performance.now()*0.05;
+    for(let i=0;i<this.cols.length;i++){ const x=i*strip, dy=drop*(0.55+0.45*this.cols[i]), wob=Math.sin((x+t)*0.02)*3*k;
+      bc.drawImage(src, x*dpr,0, strip*dpr, h*dpr, (x+wob)*dpr, dy*dpr, strip*dpr, h*dpr); }
+    sc.save(); sc.filter='blur('+(k*5).toFixed(2)+'px)'; sc.globalAlpha=1-k*0.5; sc.drawImage(this.buf,0,0,w,h); sc.restore();
+    sc.save(); sc.globalCompositeOperation='lighter'; sc.globalAlpha=k*0.16; sc.fillStyle=C.ACID; sc.fillRect(0,0,w,h); sc.restore();
+    sc.save(); sc.globalCompositeOperation='multiply'; sc.globalAlpha=k*0.55; sc.fillStyle=C.ACID; sc.fillRect(0,0,w,h); sc.restore(); }
+}
+
 /* ------------------------------ APP ---------------------------------- */
-const ST={PORTRAIT:0,SHATTER:1,BURN:2,PRINT:3,INTERACT:4};
+const ST={PORTRAIT:0,SHATTER:1,BURN:2,PRINT:3,INTERACT:4,MELT:5,PART3:6};
 class App {
   constructor(img){ this.img=img; this.stage=$('stage'); this.scene=$('scene'); this.glc=$('gl'); this.sc=this.scene.getContext('2d');
     this.hint=$('hint'); this.meterWrap=$('meter'); this.meter=this.meterWrap.firstElementChild;
-    this.portrait=new Portrait(img); this.shards=new ShardField(); this.flame=new FlameField(this.glc); this.scratch=new Scratches(); this.type=new Typesetter(); this.heap=new Heap();
-    this.drips=[]; this.state=ST.PORTRAIT; this.ptr={x:0,y:0,px:0,py:0,active:false}; this.flameSpeed=1; this.shedScale=1; this.fontScale=1; this.last=performance.now();
+    this.portrait=new Portrait(img); this.shards=new ShardField(); this.flame=new FlameField(this.glc); this.scratch=new Scratches(); this.type=new Typesetter(); this.heap=new Heap(); this.melt=new Melt(); this.part3=new Typesetter(PART3,C.PART3_CPS);
+    this.drips=[]; this.state=ST.PORTRAIT; this.ptr={x:0,y:0,px:0,py:0,active:false}; this.flameSpeed=1; this.shedScale=1; this.fontScale=1; this.last=performance.now(); this.meltK=0; this.meltStart=0;
     this._bind(); this.resize(); requestAnimationFrame(t=>this.loop(t)); }
   resize(){ const w=this.stage.clientWidth,h=this.stage.clientHeight; this.W=w; this.H=h; this.dpr=Math.min(window.devicePixelRatio||1,2);
     this.scene.width=w*this.dpr; this.scene.height=h*this.dpr; this.sc.setTransform(this.dpr,0,0,this.dpr,0,0);
-    this.portrait.build(w,h,this.dpr); this.flame.build(w,h,this.dpr); this.flame.speed=this.flameSpeed; this.scratch.build(w,h,this.dpr); this.type.layout(w,h,this.dpr,this.fontScale); this.heap.build(w,h);
+    this.portrait.build(w,h,this.dpr); this.flame.build(w,h,this.dpr); this.flame.speed=this.flameSpeed; this.scratch.build(w,h,this.dpr); this.type.layout(w,h,this.dpr,this.fontScale); this.heap.build(w,h); this.melt.build(w,h,this.dpr); this.part3.layout(w,h,this.dpr,this.fontScale);
     this._reset(); }
   _reset(){ this.state=ST.PORTRAIT; this.portrait.build(this.W,this.H,this.dpr); this.flame.build(this.W,this.H,this.dpr); this.flame.speed=this.flameSpeed; this.scratch.build(this.W,this.H,this.dpr); this.heap.build(this.W,this.H);
-    this.type.typed=0; for(const g of this.type.glyphs)g.removed=false; this.drips=[]; if(this.flame.clearGL)this.flame.clearGL();
+    this.type.typed=0; for(const g of this.type.glyphs)g.removed=false; this.part3.typed=0; this.meltK=0; this.drips=[]; if(this.flame.clearGL)this.flame.clearGL();
     this.stage.style.cursor=''; this.meterWrap.style.opacity=1; this.meter.style.width='0%'; this.meter.style.opacity=1; this.hint.style.opacity=1; this.hint.textContent='move across the face — deform the letters until they break'; this.hintGone=false; }
   _bind(){ const move=e=>{ const r=this.stage.getBoundingClientRect(); const cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left, cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top;
       this.ptr.px=this.ptr.x; this.ptr.py=this.ptr.y; this.ptr.x=cx; this.ptr.y=cy; this.ptr.active=true; this._input(); if(!this.hintGone){this.hintGone=true; this.hint.style.opacity=0;} };
@@ -338,17 +360,24 @@ class App {
   _enterBurn(){ this.state=ST.BURN; this.stage.style.cursor=KNIFE_CURSOR; this.meterWrap.style.opacity=1; this.meter.style.width='0%'; this.hint.textContent='drag the blade — cut along the dark and let it catch fire'; this.hint.style.opacity=1; this.hintGone=false; setTimeout(()=>{this.hint.style.opacity=0;this.hintGone=true;},3600); }
   _enterPrint(){ this.state=ST.PRINT; this.stage.style.cursor=''; this.meterWrap.style.opacity=0; if(this.flame.clearGL)this.flame.clearGL(); }
   _enterInteract(){ this.state=ST.INTERACT; this.hint.textContent='touch the words — let them fall'; this.hint.style.opacity=1; this.hintGone=false; setTimeout(()=>{this.hint.style.opacity=0;this.hintGone=true;},3600); }
+  _enterMelt(){ this.state=ST.MELT; this.type.render(); this.melt.start(); this.meltStart=performance.now(); this.drips.length=0; this.hint.style.opacity=0; }
+  _enterPart3(){ this.state=ST.PART3; this.part3.typed=0; this.hint.textContent=''; this.hint.style.opacity=0; }
   loop(now){ const dt=Math.min(0.05,(now-this.last)/1000); this.last=now;
     if(this.state===ST.PORTRAIT){ this.portrait.step(now); }
     else if(this.state===ST.SHATTER){ if(this.shards.done())this._enterBurn(); }
     else if(this.state===ST.BURN){ this.flame.step(dt); this.meter.style.width=Math.min(100,this.flame.coverage()/C.BURN_DONE*100)+'%'; if(this.flame.coverage()>=C.BURN_DONE)this._enterPrint(); }
     else if(this.state===ST.PRINT){ if(this.type.advance(dt))this._enterInteract(); }
+    else if(this.state===ST.INTERACT){ if(this.heap.landed.length>=C.MELT_AFTER_FRAC*this.type.droppable)this._enterMelt(); }
+    else if(this.state===ST.MELT){ this.meltK=Math.min(1,(now-this.meltStart)/C.MELT_MS); if(this.meltK>=1)this._enterPart3(); }
+    else if(this.state===ST.PART3){ this.part3.advance(dt); }
     if(this.drips.length){ for(let i=this.drips.length-1;i>=0;i--){ const L=this.drips[i]; L.step(); if(L.y>=this.heap.topAt(L.x)-L.fs*0.5||L.y>=this.H-L.fs*0.4){ this.heap.settle(L); this.drips.splice(i,1); } } }
 
     const sc=this.sc,w=this.W,h=this.H; sc.clearRect(0,0,w,h);
     if(this.state===ST.PORTRAIT){ if(this.portrait.dirty||this.portrait.live.size)this.portrait.render(); sc.drawImage(this.portrait.cv,0,0,w,h); }
     else if(this.state===ST.SHATTER){ this.shards.render(sc); }
     else if(this.state===ST.BURN){ sc.fillStyle=C.BG; sc.fillRect(0,0,w,h); sc.drawImage(this.scratch.cv,0,0,w,h); this.flame.render(now); }
+    else if(this.state===ST.MELT){ sc.fillStyle=C.BG; sc.fillRect(0,0,w,h); this.heap.draw(sc); this.melt.render(sc,this.type.cv,this.meltK); }
+    else if(this.state===ST.PART3){ sc.fillStyle=C.BG; sc.fillRect(0,0,w,h); this.part3.render(); sc.drawImage(this.part3.cv,0,0,w,h); }
     else { sc.fillStyle=C.BG; sc.fillRect(0,0,w,h); this.type.render(); sc.drawImage(this.type.cv,0,0,w,h); for(const L of this.drips)L.draw(sc); this.heap.draw(sc); }
 
     requestAnimationFrame(t=>this.loop(t)); }
