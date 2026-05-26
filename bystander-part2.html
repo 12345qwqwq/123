@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>BYSTANDER · PART II</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0a0708;
+  font-family: "Courier New", ui-monospace, monospace;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#gl {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* ---------- control panel ---------- */
+#panel {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  width: 190px;
+  background: rgba(12, 8, 8, 0.55);
+  border: 1px solid rgba(255, 120, 50, 0.25);
+  border-radius: 4px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: #e8d9cf;
+  font-size: 11px;
+  letter-spacing: 2px;
+  transition: opacity .4s ease;
+}
+#panel:hover { opacity: 1; }
+
+.panel-title {
+  font-size: 13px;
+  letter-spacing: 5px;
+  color: #ff7a3c;
+  text-align: center;
+  margin-bottom: 2px;
+}
+
+#panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+#panel input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, #5a1a08, #ff7a3c);
+  border-radius: 3px;
+  outline: none;
+}
+#panel input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: #ffd9a8;
+  border: 1px solid #ff7a3c;
+  cursor: pointer;
+}
+#panel input[type="range"]::-moz-range-thumb {
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: #ffd9a8;
+  border: 1px solid #ff7a3c;
+  cursor: pointer;
+}
+
+#panel input[type="color"] {
+  width: 100%;
+  height: 24px;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+#ctl-reset {
+  margin-top: 4px;
+  padding: 7px;
+  background: transparent;
+  border: 1px solid rgba(255, 120, 50, 0.4);
+  color: #e8d9cf;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background .2s, color .2s;
+}
+#ctl-reset:hover { background: rgba(255, 120, 50, 0.18); color: #fff; }
+
+/* ---------- intro ---------- */
+#intro {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #1a1413;
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 1.4s ease;
+}
+#intro h1 {
+  font-size: clamp(40px, 11vw, 130px);
+  letter-spacing: 8px;
+  font-weight: 900;
+}
+#intro h2 {
+  font-size: clamp(12px, 2.4vw, 20px);
+  letter-spacing: 10px;
+  color: #6b3a2a;
+}
+#intro p {
+  margin-top: 26px;
+  font-size: 12px;
+  letter-spacing: 3px;
+  line-height: 1.9;
+  color: #8a5a48;
+}
+#intro.gone { opacity: 0; }
+</style>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <div id="panel">
+    <div class="panel-title">EMBER</div>
+    <label>SIZE
+      <input id="ctl-size" type="range" min="40" max="160" value="80" />
+    </label>
+    <label>SPEED
+      <input id="ctl-speed" type="range" min="0" max="200" value="60" />
+    </label>
+    <label>COLOR
+      <input id="ctl-color" type="color" value="#ff5a14" />
+    </label>
+    <button id="ctl-reset">RE&middot;SEAL PAPER</button>
+  </div>
+
+  <div id="intro">
+    <h1>BYSTANDER</h1>
+    <h2>PART&nbsp;II &middot; NO.17</h2>
+    <p>Drag the ember across the paper.<br/>Let the flame burn through.</p>
+  </div>
+
+<script>
+"use strict";
+/* BYSTANDER · PART II
+ * Interactive metaball "ember" that burns through a paper mask
+ * to reveal the buried narrative. Pure WebGL1, no dependencies.
+ */
+
+// ----------------------------------------------------------------------------
+// The buried text (image 1 -> Part II's English text)
+// ----------------------------------------------------------------------------
+const STORY = [
+  "You are No. 17 of the home for the disabled.",
+  "A single piece of candy in childhood undid everything.",
+  "",
+  "The man crouched down. The wrapper turned between his fingers,",
+  "sunlight breaking a small rainbow across it. You reached out.",
+  "",
+  "Then the basement. Very small. The air damp and mouldy —",
+  "like a coffin measured, in advance, to fit you.",
+  "The bulb buzzed overhead, white and scalding,",
+  "searing tears from your eyes. You thought that was the worst.",
+  "",
+  "When the acid landed on your face you learned what worst meant.",
+  "The pain was nearly death; you screamed, and the sound",
+  "bounced back and forth off the concrete walls.",
+  "",
+  "Your mind blurred. You remembered the butterfly in the textbook —",
+  "people know it becomes something beautiful; they do not know",
+  "the caterpillar melts, burns, and sloughs away inside, in agony.",
+  "And your ending would not even be beauty.",
+  "",
+  "He watched you, a sculptor studying an unfinished work.",
+  "But his purpose was ruin.",
+  "“Hm... maybe one more line here.” He tilted his head.",
+  "“A little asymmetry is better. The voice is a problem too.”",
+  "The knife-tip pressed to skin.",
+  "",
+  "Your vocal cords became a junked cassette. You felt it shake",
+  "in your throat; what came out was only the hiss of friction,",
+  "a radio stuck on a dead frequency.",
+  "",
+  "He set you by the roadside. Cardboard, the words neat:",
+  "“Born disabled, no one to lean on — kind soul, please help.”",
+  "You wanted to tear it off. To scream: it is NOT congenital.",
+  "Someone did this. Save me. Call the police. I will kill him.",
+  "But you could not make a sound.",
+  "",
+  "Coins fell into the iron basin. Clink. Clink. Clink-clink.",
+  "Someone crouched, said “what a poor child,” and walked away.",
+  "Your limbs had no strength. The scalding was branded in",
+  "deep, burning your consciousness to pieces.",
+  "",
+  "You lowered your head. The coins stacked in the basin,",
+  "blurrily reflecting a face.",
+  "",
+  "— Who are you?"
+];
+
+// ----------------------------------------------------------------------------
+// GL setup
+// ----------------------------------------------------------------------------
+const canvas = document.getElementById("gl");
+const gl = canvas.getContext("webgl", { antialias: true, premultipliedAlpha: false });
+if (!gl) { alert("WebGL not supported."); throw new Error("no webgl"); }
+
+const MAX_BALLS = 12;
+
+const QUAD_VS = `
+attribute vec2 a_pos;
+varying vec2 v_uv;
+void main(){
+  v_uv = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}`;
+
+// metaball field shared between both shaders
+const FIELD_FN = `
+uniform vec3 u_balls[${MAX_BALLS}];   // x,y in pixels, z = radius
+uniform int  u_count;
+float fieldAt(vec2 p){
+  float s = 0.0;
+  for(int i=0;i<${MAX_BALLS};i++){
+    if(i >= u_count) break;
+    vec2 d = p - u_balls[i].xy;
+    float r = u_balls[i].z;
+    s += (r*r) / (dot(d,d) + 1.0);
+  }
+  return s;
+}`;
+
+// Pass 1: accumulate permanent burn from where the flame dwells
+const BURN_FS = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_prev;
+uniform vec2  u_res;
+uniform float u_burnRate;
+${FIELD_FN}
+void main(){
+  vec2 p = v_uv * u_res;
+  float prev = texture2D(u_prev, v_uv).r;
+  float f = fieldAt(p);
+  float heat = smoothstep(0.75, 1.6, f);          // only the hot core burns
+  float nb = clamp(prev + heat * u_burnRate, 0.0, 1.0);
+  nb = max(nb, prev);                             // burning is irreversible
+  gl_FragColor = vec4(vec3(nb), 1.0);
+}`;
+
+// Pass 2: composite paper + char + revealed art/story + live flame
+const COMP_FS = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_paper;
+uniform sampler2D u_story;
+uniform sampler2D u_burn;
+uniform vec2  u_res;
+uniform float u_time;
+uniform vec3  u_flame;     // user color tint
+${FIELD_FN}
+
+// --- value noise / fbm ---
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i),               hash(i+vec2(1,0)), u.x),
+             mix(hash(i+vec2(0,1)),      hash(i+vec2(1,1)), u.x), u.y);
+}
+float fbm(vec2 p){
+  float v = 0.0, a = 0.5;
+  for(int i=0;i<5;i++){ v += a*noise(p); p *= 2.0; a *= 0.5; }
+  return v;
+}
+
+// image-1 vibe: bruised red / blue / white-slash painterly field
+vec3 paintBg(vec2 uv){
+  vec2 q = uv;
+  q += 0.18 * vec2(fbm(uv*2.0 + u_time*0.02), fbm(uv*2.0 + 5.2 - u_time*0.02));
+  float n = fbm(q*3.0);
+  float m = fbm(q*1.3 + 2.0);
+  vec3 darkred = vec3(0.16, 0.0, 0.02);
+  vec3 red     = vec3(0.55, 0.03, 0.05);
+  vec3 blue    = vec3(0.09, 0.13, 0.78);
+  vec3 white   = vec3(0.93, 0.93, 0.97);
+  vec3 c = mix(darkred, red, smoothstep(0.30, 0.72, n));
+  c = mix(c, blue,  smoothstep(0.58, 0.92, m));
+  c = mix(c, white, smoothstep(0.80, 0.97, fbm(q*5.0 + 10.0)) * 0.85);
+  c *= 0.45 + 0.70 * smoothstep(0.1, 0.85, n);
+  return c;
+}
+
+void main(){
+  vec2 uv = v_uv;
+  vec2 p  = uv * u_res;
+
+  // revealed layer: painterly art + narrative text over it
+  vec3 bg = paintBg(uv);
+  vec4 story = texture2D(u_story, uv);
+  bg = mix(bg, story.rgb, story.a);
+
+  vec4 paper = texture2D(u_paper, uv);
+  float b = texture2D(u_burn, uv).r;            // accumulated burn 0..1
+
+  float hole     = smoothstep(0.50, 0.72, b);                 // burned away
+  float charBand = smoothstep(0.10, 0.50, b) * (1.0 - hole);  // image-6 edge
+
+  // char edge: scorched brown -> black, broken up by noise
+  float grain = fbm(p * 0.06);
+  vec3 charCol = mix(vec3(0.34, 0.19, 0.07), vec3(0.03, 0.02, 0.02),
+                     smoothstep(0.28, 0.55, b + grain*0.12));
+
+  vec3 col = paper.rgb;
+  col = mix(col, charCol, charBand);
+  col = mix(col, bg, hole);
+
+  // warm scorch halo just outside the char
+  float scorch = smoothstep(0.02, 0.14, b) * (1.0 - smoothstep(0.14, 0.30, b));
+  col = mix(col, col * vec3(1.15, 0.85, 0.6), scorch * 0.6);
+
+  // live flame (images 4 & 5): white-hot core -> tinted edge, additive
+  float f    = fieldAt(p);
+  float glow = smoothstep(0.45, 1.0, f);
+  float core = smoothstep(1.1, 3.0, f);
+  vec3 edge  = u_flame;
+  vec3 flame = mix(edge * vec3(1.0, 0.45, 0.18), vec3(1.0, 0.96, 0.82), core);
+  // flicker
+  float flick = 0.85 + 0.15 * sin(u_time*9.0 + f*3.0);
+  col += flame * glow * flick;
+
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+// ----------------------------------------------------------------------------
+// shader helpers
+// ----------------------------------------------------------------------------
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    throw new Error(gl.getShaderInfoLog(s) + "\n" + src);
+  return s;
+}
+function program(vs, fs){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, "a_pos");
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+    throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+const burnProg = program(QUAD_VS, BURN_FS);
+const compProg = program(QUAD_VS, COMP_FS);
+
+// fullscreen quad
+const quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+function uloc(prog, names){
+  const o = {};
+  for (const n of names) o[n] = gl.getUniformLocation(prog, n);
+  return o;
+}
+const burnU = uloc(burnProg, ["u_prev","u_res","u_burnRate","u_balls","u_count"]);
+const compU = uloc(compProg, ["u_paper","u_story","u_burn","u_res","u_time","u_flame","u_balls","u_count"]);
+
+// ----------------------------------------------------------------------------
+// textures & framebuffers
+// ----------------------------------------------------------------------------
+function makeTex(){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  return t;
+}
+
+let burnFBO = [null, null], burnTex = [null, null], readIdx = 0;
+function makeBurnTarget(i, w, h){
+  if (!burnTex[i]) burnTex[i] = makeTex();
+  gl.bindTexture(gl.TEXTURE_2D, burnTex[i]);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  if (!burnFBO[i]) burnFBO[i] = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, burnFBO[i]);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, burnTex[i], 0);
+  // clear to zero burn
+  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+const paperTex = makeTex();
+const storyTex = makeTex();
+
+// ----------------------------------------------------------------------------
+// 2D canvases baked into textures: paper(+title) and story
+// ----------------------------------------------------------------------------
+const paperCv = document.createElement("canvas");
+const storyCv = document.createElement("canvas");
+const pcx = paperCv.getContext("2d");
+const scx = storyCv.getContext("2d");
+
+function buildPaper(w, h){
+  paperCv.width = w; paperCv.height = h;
+  // paper base
+  pcx.fillStyle = "#efe9e0";
+  pcx.fillRect(0, 0, w, h);
+  // subtle fibre / blotch grain
+  const img = pcx.getImageData(0, 0, w, h);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4){
+    const n = (Math.random() - 0.5) * 18;
+    d[i]   += n; d[i+1] += n; d[i+2] += n - 2;
+  }
+  pcx.putImageData(img, 0, 0);
+  // faint vignette so paper feels lit
+  const g = pcx.createRadialGradient(w/2, h/2, h*0.1, w/2, h/2, h*0.9);
+  g.addColorStop(0, "rgba(255,255,255,0.10)");
+  g.addColorStop(1, "rgba(60,40,30,0.18)");
+  pcx.fillStyle = g; pcx.fillRect(0, 0, w, h);
+
+  // scratchy charcoal title (image 2)
+  drawScratch("BYSTANDER", w/2, h*0.42, Math.min(w*0.12, h*0.20), w*0.92);
+  drawScratch("PART  II", w/2, h*0.60, Math.min(w*0.045, h*0.075), w*0.5);
+
+  gl.bindTexture(gl.TEXTURE_2D, paperTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, paperCv);
+}
+
+function drawScratch(text, cx, cy, size, maxW){
+  pcx.save();
+  pcx.textAlign = "center";
+  pcx.textBaseline = "middle";
+  pcx.font = `900 ${size}px "Courier New", monospace`;
+  // shrink to fit
+  while (pcx.measureText(text).width > maxW && size > 6){
+    size *= 0.94; pcx.font = `900 ${size}px "Courier New", monospace`;
+  }
+  // layered jittered strokes -> rough hand-inked look
+  for (let k = 0; k < 5; k++){
+    pcx.fillStyle = `rgba(20,16,15,${0.22 + k*0.06})`;
+    const jx = (Math.random()-0.5) * size*0.05;
+    const jy = (Math.random()-0.5) * size*0.05;
+    pcx.fillText(text, cx + jx, cy + jy);
+  }
+  pcx.restore();
+  // speckle erosion so the ink looks dry/cracked
+  const x0 = Math.max(0, cx - maxW/2 - 10), y0 = Math.max(0, cy - size*0.8);
+  const ww = Math.min(paperCv.width - x0, maxW + 20), hh = size*1.6;
+  const im = pcx.getImageData(x0, y0, ww, hh);
+  const dd = im.data;
+  for (let i = 0; i < dd.length; i += 4){
+    if (dd[i] < 90 && Math.random() < 0.30){ dd[i]=239; dd[i+1]=233; dd[i+2]=224; }
+  }
+  pcx.putImageData(im, x0, y0);
+}
+
+function buildStory(w, h){
+  storyCv.width = w; storyCv.height = h;
+  scx.clearRect(0, 0, w, h);
+  const fs = Math.max(13, Math.min(w / 64, 22));
+  scx.font = `${fs}px "Courier New", monospace`;
+  scx.textBaseline = "top";
+  const lh = fs * 1.5;
+  const blockH = STORY.length * lh;
+  let y = (h - blockH) / 2;
+  const x = w * 0.10;
+  for (const line of STORY){
+    if (line.startsWith("—") || line.startsWith("“")){
+      scx.fillStyle = "rgba(255,235,225,0.96)";
+    } else {
+      scx.fillStyle = "rgba(244,238,232,0.90)";
+    }
+    scx.shadowColor = "rgba(0,0,0,0.85)";
+    scx.shadowBlur = 6;
+    scx.fillText(line, x, y);
+    y += lh;
+  }
+  gl.bindTexture(gl.TEXTURE_2D, storyTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, storyCv);
+}
+
+// ----------------------------------------------------------------------------
+// metaball physics
+// ----------------------------------------------------------------------------
+let W = 0, H = 0;                 // backing-store pixels
+const DPR = Math.min(window.devicePixelRatio || 1, 1.6);
+
+const settings = { size: 80, speed: 0.6, color: [1.0, 0.35, 0.08], burnRate: 0.05 };
+
+let balls = [];
+function initBalls(){
+  balls = [];
+  // ball 0 = the cursor ember
+  balls.push({ x: W*0.5, y: H*0.5, vx: 0, vy: 0, scale: 1.0, cursor: true });
+  for (let i = 0; i < 7; i++){
+    balls.push({
+      x: Math.random()*W, y: Math.random()*H,
+      vx: (Math.random()-0.5)*2, vy: (Math.random()-0.5)*2,
+      scale: 0.55 + Math.random()*0.5, cursor: false
+    });
+  }
+}
+
+const pointer = { x: 0, y: 0, down: false, grab: -1 };
+
+function stepPhysics(){
+  for (let i = 0; i < balls.length; i++){
+    const b = balls[i];
+    const r = settings.size * b.scale;
+    if (i === pointer.grab){
+      // dragged ball pinned to pointer, record velocity for fling
+      b.vx = (pointer.x - b.x) * 0.5;
+      b.vy = (pointer.y - b.y) * 0.5;
+      b.x = pointer.x; b.y = pointer.y;
+      continue;
+    }
+    if (b.cursor){
+      // ember eases toward pointer (the "hand")
+      b.x += (pointer.x - b.x) * 0.22;
+      b.y += (pointer.y - b.y) * 0.22;
+      continue;
+    }
+    b.x += b.vx * settings.speed;
+    b.y += b.vy * settings.speed;
+    if (b.x < r){ b.x = r; b.vx = Math.abs(b.vx); }
+    if (b.x > W-r){ b.x = W-r; b.vx = -Math.abs(b.vx); }
+    if (b.y < r){ b.y = r; b.vy = Math.abs(b.vy); }
+    if (b.y > H-r){ b.y = H-r; b.vy = -Math.abs(b.vy); }
+  }
+  // soft repulsion between close balls -> surface-tension wobble
+  for (let i = 1; i < balls.length; i++){
+    for (let j = i+1; j < balls.length; j++){
+      const a = balls[i], c = balls[j];
+      if (a.cursor || c.cursor) continue;
+      const dx = c.x - a.x, dy = c.y - a.y;
+      const d2 = dx*dx + dy*dy;
+      const rr = (settings.size * (a.scale + c.scale)) * 0.8;
+      if (d2 < rr*rr && d2 > 1){
+        const d = Math.sqrt(d2);
+        const f = (rr - d) / rr * 0.06;
+        const nx = dx/d, ny = dy/d;
+        a.vx -= nx*f; a.vy -= ny*f;
+        c.vx += nx*f; c.vy += ny*f;
+      }
+    }
+  }
+}
+
+function packBalls(){
+  const arr = new Float32Array(MAX_BALLS * 3);
+  const n = Math.min(balls.length, MAX_BALLS);
+  for (let i = 0; i < n; i++){
+    arr[i*3]   = balls[i].x;
+    arr[i*3+1] = balls[i].y;
+    arr[i*3+2] = settings.size * balls[i].scale;
+  }
+  return { arr, n };
+}
+
+// ----------------------------------------------------------------------------
+// render loop
+// ----------------------------------------------------------------------------
+let t0 = performance.now();
+function frame(now){
+  const t = (now - t0) / 1000;
+  stepPhysics();
+  const { arr, n } = packBalls();
+
+  // pass 1: burn accumulation (ping-pong)
+  const writeIdx = 1 - readIdx;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, burnFBO[writeIdx]);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(burnProg);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, burnTex[readIdx]);
+  gl.uniform1i(burnU.u_prev, 0);
+  gl.uniform2f(burnU.u_res, W, H);
+  gl.uniform1f(burnU.u_burnRate, settings.burnRate);
+  gl.uniform3fv(burnU.u_balls, arr);
+  gl.uniform1i(burnU.u_count, n);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  readIdx = writeIdx;
+
+  // pass 2: composite to screen
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(compProg);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, paperTex);
+  gl.uniform1i(compU.u_paper, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, storyTex);
+  gl.uniform1i(compU.u_story, 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, burnTex[readIdx]);
+  gl.uniform1i(compU.u_burn, 2);
+  gl.uniform2f(compU.u_res, W, H);
+  gl.uniform1f(compU.u_time, t);
+  gl.uniform3fv(compU.u_flame, settings.color);
+  gl.uniform3fv(compU.u_balls, arr);
+  gl.uniform1i(compU.u_count, n);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  requestAnimationFrame(frame);
+}
+
+// ----------------------------------------------------------------------------
+// resize
+// ----------------------------------------------------------------------------
+function resize(){
+  W = Math.floor(window.innerWidth  * DPR);
+  H = Math.floor(window.innerHeight * DPR);
+  canvas.width = W; canvas.height = H;
+  canvas.style.width = window.innerWidth + "px";
+  canvas.style.height = window.innerHeight + "px";
+  makeBurnTarget(0, W, H);
+  makeBurnTarget(1, W, H);
+  readIdx = 0;
+  buildPaper(W, H);
+  buildStory(W, H);
+  if (balls.length === 0) initBalls();
+  pointer.x = W/2; pointer.y = H/2;
+}
+
+// ----------------------------------------------------------------------------
+// interaction
+// ----------------------------------------------------------------------------
+function setPointer(e){
+  const t = e.touches ? e.touches[0] : e;
+  pointer.x = t.clientX * DPR;
+  pointer.y = (window.innerHeight - t.clientY) * DPR;  // flip: GL origin bottom-left
+}
+function grabNearest(){
+  let best = -1, bd = (settings.size * 1.6) ** 2;
+  for (let i = 1; i < balls.length; i++){
+    const dx = balls[i].x - pointer.x, dy = balls[i].y - pointer.y;
+    const d2 = dx*dx + dy*dy;
+    if (d2 < bd){ bd = d2; best = i; }
+  }
+  pointer.grab = best;
+}
+canvas.addEventListener("mousemove", setPointer);
+canvas.addEventListener("mousedown", (e) => { setPointer(e); pointer.down = true; grabNearest(); });
+window.addEventListener("mouseup", () => { pointer.down = false; pointer.grab = -1; });
+canvas.addEventListener("touchstart", (e) => { setPointer(e); pointer.down = true; grabNearest(); e.preventDefault(); }, { passive:false });
+canvas.addEventListener("touchmove", (e) => { setPointer(e); e.preventDefault(); }, { passive:false });
+window.addEventListener("touchend", () => { pointer.down = false; pointer.grab = -1; });
+
+// dismiss intro on first interaction
+const intro = document.getElementById("intro");
+function dismissIntro(){ intro.classList.add("gone"); }
+canvas.addEventListener("mousedown", dismissIntro, { once:true });
+canvas.addEventListener("touchstart", dismissIntro, { once:true });
+canvas.addEventListener("mousemove", dismissIntro, { once:true });
+
+// controls
+const cSize  = document.getElementById("ctl-size");
+const cSpeed = document.getElementById("ctl-speed");
+const cColor = document.getElementById("ctl-color");
+const cReset = document.getElementById("ctl-reset");
+cSize.addEventListener("input",  () => settings.size = +cSize.value);
+cSpeed.addEventListener("input", () => settings.speed = +cSpeed.value / 100);
+function hex2rgb(h){
+  const n = parseInt(h.slice(1), 16);
+  return [((n>>16)&255)/255, ((n>>8)&255)/255, (n&255)/255];
+}
+cColor.addEventListener("input", () => settings.color = hex2rgb(cColor.value));
+cReset.addEventListener("click", () => { makeBurnTarget(0,W,H); makeBurnTarget(1,W,H); readIdx = 0; });
+settings.size = +cSize.value;
+settings.speed = +cSpeed.value / 100;
+settings.color = hex2rgb(cColor.value);
+
+window.addEventListener("resize", resize);
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
